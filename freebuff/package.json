@@ -17,5 +17,8 @@
     "e2e:code-edit": "bun test e2e/tests/code-edit.e2e.test.ts",
     "e2e:terminal-command": "bun test e2e/tests/terminal-command.e2e.test.ts",
     "e2e:knowledge-file": "bun test e2e/tests/knowledge-file.e2e.test.ts"
+  },
+  "dependencies": {
+    "js-yaml": "^5.4.1"
   }
 }
