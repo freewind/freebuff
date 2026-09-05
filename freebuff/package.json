@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "acp": "bun acp/run-acp.ts",
     "release": "bun cli/release.ts",
     "build:binary": "bun cli/build.ts 0.0.0-dev",
     "e2e": "bun run build:binary && bun test e2e/tests/",
