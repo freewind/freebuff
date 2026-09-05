@@ -1,6 +1,53 @@
 import { describe, test, expect } from 'bun:test'
 
-import { isSensitiveFile } from '../../utils/create-run-config'
+import { createRunConfig, isSensitiveFile } from '../../utils/create-run-config'
+import type { EventHandlerState } from '../../utils/sdk-event-handlers'
+
+const mockLogger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+} as unknown as Parameters<typeof createRunConfig>[0]['logger']
+
+function baseParams() {
+  return {
+    logger: mockLogger,
+    agent: 'base3-free-deepseek-flash',
+    prompt: 'hello',
+    content: undefined,
+    previousRunState: null,
+    agentDefinitions: [],
+    eventHandlerState: {} as EventHandlerState,
+    signal: new AbortController().signal,
+  }
+}
+
+describe('createRunConfig', () => {
+  test('passes drainSteeringMessages through to the run options', () => {
+    const drain = () => ['advisor opinion']
+    const config = createRunConfig({
+      ...baseParams(),
+      drainSteeringMessages: drain,
+    })
+    expect(config.drainSteeringMessages).toBe(drain)
+  })
+
+  test('leaves drainSteeringMessages undefined when not provided', () => {
+    const config = createRunConfig(baseParams())
+    expect(config.drainSteeringMessages).toBeUndefined()
+  })
+
+  test('keeps existing core options intact', () => {
+    const config = createRunConfig(baseParams())
+    expect(config.agent).toBe('base3-free-deepseek-flash')
+    expect(config.prompt).toBe('hello')
+    expect(config.previousRun).toBeUndefined()
+    expect(typeof config.handleStreamChunk).toBe('function')
+    expect(typeof config.handleEvent).toBe('function')
+    expect(typeof config.fileFilter).toBe('function')
+  })
+})
 
 describe('isSensitiveFile', () => {
   test.each([
