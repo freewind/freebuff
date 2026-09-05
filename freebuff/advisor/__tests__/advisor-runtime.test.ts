@@ -5,6 +5,8 @@ import type { RunState } from '@codebuff/sdk'
 import { ADVISOR_AGENT_ID, buildAdvisorAgentDefinition } from '../advisor-agent'
 import {
   AdvisorRuntime,
+  extractInterruptText,
+  isInterruptOpinion,
   serializeTranscript,
   type AdvisorRunOptions,
 } from '../advisor-runtime'
@@ -160,6 +162,90 @@ describe('AdvisorRuntime.onTurnEnd', () => {
     )
     await runtime.onTurnEnd([textMessage('user', 'u1')])
     expect(runtime.drainOpinions()).toEqual([])
+  })
+})
+
+describe('AdvisorRuntime interrupt channel', () => {
+  it('interrupt() aborts via callback and queues an interrupting opinion', () => {
+    const aborts: number[] = []
+    const runtime = new AdvisorRuntime({
+      config: CONFIG,
+      run: async () => SUCCESS_STATE,
+      onAbortRequested: () => aborts.push(1),
+    })
+
+    runtime.interrupt('URGENT: check this')
+
+    expect(aborts).toHaveLength(1)
+    expect(runtime.drainInterruptOpinions()).toEqual(['URGENT: check this'])
+    expect(runtime.drainOpinions()).toEqual([])
+  })
+
+  it('interrupt() is safe without an abort callback', () => {
+    const runtime = new AdvisorRuntime({
+      config: CONFIG,
+      run: async () => SUCCESS_STATE,
+    })
+    runtime.interrupt('opinion')
+    expect(runtime.drainInterruptOpinions()).toEqual(['opinion'])
+  })
+
+  it('ignores empty interrupt opinions', () => {
+    const aborts: number[] = []
+    const runtime = new AdvisorRuntime({
+      config: CONFIG,
+      run: async () => SUCCESS_STATE,
+      onAbortRequested: () => aborts.push(1),
+    })
+    runtime.interrupt('   ')
+    expect(aborts).toHaveLength(0)
+    expect(runtime.drainInterruptOpinions()).toEqual([])
+  })
+
+  it('escalates advisor output with the INTERRUPT: prefix and strips it', async () => {
+    const aborts: number[] = []
+    const runtime = new AdvisorRuntime({
+      config: CONFIG,
+      run: async () =>
+        ({
+          output: {
+            type: 'lastMessage',
+            value: [
+              {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'INTERRUPT: stop now' }],
+              },
+            ],
+          },
+        }) as unknown as RunState,
+      onAbortRequested: () => aborts.push(1),
+    })
+
+    await runtime.onTurnEnd([textMessage('user', 'u1')])
+
+    expect(aborts).toHaveLength(1)
+    expect(runtime.drainInterruptOpinions()).toEqual(['stop now'])
+    expect(runtime.drainOpinions()).toEqual([])
+  })
+
+  it('keeps normal opinions out of the interrupt queue and vice versa', async () => {
+    const runtime = new AdvisorRuntime({
+      config: CONFIG,
+      run: async () => SUCCESS_STATE,
+    })
+    await runtime.onTurnEnd([textMessage('user', 'u1')]) // normal opinion queued
+    runtime.interrupt('interrupting opinion')
+
+    expect(runtime.drainInterruptOpinions()).toEqual(['interrupting opinion'])
+    expect(runtime.drainOpinions()).toEqual(['review opinion'])
+  })
+
+  it('parses interrupt prefix helpers', () => {
+    expect(isInterruptOpinion('INTERRUPT: stop')).toBe(true)
+    expect(isInterruptOpinion('  INTERRUPT:  stop  ')).toBe(true)
+    expect(isInterruptOpinion('regular opinion')).toBe(false)
+    expect(extractInterruptText('INTERRUPT: stop now')).toBe('stop now')
+    expect(extractInterruptText('  INTERRUPT:  stop  ')).toBe('stop')
   })
 })
 

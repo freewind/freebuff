@@ -9,11 +9,24 @@ import { ADVISOR_TAG, computeTranscriptDiff } from './transcript-diff'
 /** Options accepted by a Freebuff run (RunOptions + client-level options). */
 export type AdvisorRunOptions = RunOptions & CodebuffClientOptions
 
+/**
+ * Prefix an advisor opinion with this to escalate it to the interrupting
+ * channel: the runtime aborts the active run and delivers the opinion ahead
+ * of everything else (parsed and stripped at delivery time).
+ */
+export const INTERRUPT_PREFIX = 'INTERRUPT:'
+
 /** Dependencies for the Advisor runtime. `run` is injected for testability. */
 export interface AdvisorRuntimeDeps {
   config: AdvisorConfig
   /** Executes the advisor's review run (client.run equivalent). */
   run: (options: AdvisorRunOptions) => Promise<RunState>
+  /**
+   * Called when an interrupting opinion is queued; the CLI aborts the active
+   * main-agent run here. Optional — without it, interrupt opinions still
+   * queue and are delivered first on the next opportunity.
+   */
+  onAbortRequested?: () => void
 }
 
 /**
@@ -33,12 +46,15 @@ export interface AdvisorRuntimeDeps {
 export class AdvisorRuntime {
   #config: AdvisorConfig
   #run: (options: AdvisorRunOptions) => Promise<RunState>
+  #onAbortRequested: (() => void) | undefined
   #lastAdvisorIndex = 0
   #pendingOpinions: string[] = []
+  #interruptOpinions: string[] = []
 
   constructor(deps: AdvisorRuntimeDeps) {
     this.#config = deps.config
     this.#run = deps.run
+    this.#onAbortRequested = deps.onAbortRequested
   }
 
   /**
@@ -56,13 +72,38 @@ export class AdvisorRuntime {
 
     const opinion = await this.#runAdvisor(diff.messages)
     if (opinion) {
-      this.#pendingOpinions.push(opinion)
+      if (isInterruptOpinion(opinion)) {
+        this.#queueInterrupt(extractInterruptText(opinion))
+      } else {
+        this.#pendingOpinions.push(opinion)
+      }
     }
   }
 
   /** Returns and clears the opinions queued for the next step boundary. */
   drainOpinions(): string[] {
     return this.#pendingOpinions.splice(0)
+  }
+
+  /**
+   * Explicitly escalates an opinion to the interrupting channel: aborts the
+   * active main-agent run (via onAbortRequested) and queues the opinion for
+   * delivery ahead of everything else (CLI places it at the head of the
+   * message queue).
+   */
+  interrupt(opinion: string): void {
+    if (!opinion.trim()) return
+    this.#queueInterrupt(opinion)
+  }
+
+  /** Returns and clears the interrupting opinions. */
+  drainInterruptOpinions(): string[] {
+    return this.#interruptOpinions.splice(0)
+  }
+
+  #queueInterrupt(opinion: string): void {
+    this.#interruptOpinions.push(opinion)
+    this.#onAbortRequested?.()
   }
 
   /** Builds a user message tagged ADVISOR for loop-prevention filtering. */
@@ -123,6 +164,19 @@ export function extractOpinion(output: AgentOutput | undefined): string | null {
     if (opinion) return opinion
   }
   return null
+}
+
+/** Whether an opinion text carries the interrupt escalation prefix. */
+export function isInterruptOpinion(opinion: string): boolean {
+  return opinion.trim().startsWith(INTERRUPT_PREFIX)
+}
+
+/** Strips the interrupt prefix, returning the plain opinion text. */
+export function extractInterruptText(opinion: string): string {
+  return opinion
+    .trim()
+    .replace(/^INTERRUPT:\s*/, '')
+    .trim()
 }
 
 /** Serializes the delta messages into a compact review prompt. */
