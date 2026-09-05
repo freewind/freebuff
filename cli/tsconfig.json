@@ -15,7 +15,8 @@
     "baseUrl": ".",
     "paths": {
       "@codebuff/sdk": ["../sdk/src/index.ts"],
-      "@codebuff/common/*": ["../common/src/*"]
+      "@codebuff/common/*": ["../common/src/*"],
+      "@codebuff/freebuff/*": ["../freebuff/*"]
     }
   },
   "include": ["src/**/*", "scripts/**/*.ts"],

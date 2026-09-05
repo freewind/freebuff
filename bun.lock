@@ -44,6 +44,7 @@
         "codebuff-tui": "./bin/codecane",
       },
       "dependencies": {
+        "@codebuff/freebuff": "workspace:*",
         "@codebuff/sdk": "workspace:*",
         "@gravity-ai/api": "^0.1.2",
         "@opentui/core": "0.3.4",

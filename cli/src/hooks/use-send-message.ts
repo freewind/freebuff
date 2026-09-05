@@ -17,6 +17,7 @@ import { createRunConfig } from '../utils/create-run-config'
 import { getAgentIdForMode } from '../utils/freebuff-agent-selection'
 import { loadAgentDefinitions } from '../utils/local-agent-registry'
 import { logger } from '../utils/logger'
+import { ensureAdvisorRuntime, setAdvisorInterruptHandler } from '../utils/advisor-wiring'
 import { clearActiveRun, registerActiveRun } from '../utils/active-run'
 import {
   clearLiveChatStateProvider,
@@ -599,6 +600,32 @@ export const useSendMessage = ({
         const freebuffReasoningEffort = IS_FREEBUFF
           ? getSelectedFreebuffReasoningEffort()
           : null
+        // Advisor side-channel (optional, best-effort). Lazily loaded from
+        // advisor.yml; missing/invalid config disables it. Never affects the
+        // main flow: initialization and all advisor work are wrapped so
+        // failures degrade to a warn log.
+        let advisorRuntime: ReturnType<typeof ensureAdvisorRuntime> = null
+        try {
+          advisorRuntime = ensureAdvisorRuntime({
+            run: async (advisorOptions) => {
+              const advisorClient = await getClient()
+              if (!advisorClient) throw new Error('No Freebuff client for advisor run')
+              return advisorClient.run(advisorOptions)
+            },
+          })
+        } catch (advisorError) {
+          logger.warn({ error: advisorError }, '[advisor] failed to initialize')
+        }
+        if (advisorRuntime) {
+          // Interrupting channel: abort the active run and put the interrupt
+          // opinions at the head of the message queue (most-priority delivery).
+          setAdvisorInterruptHandler(() => {
+            abortController.abort('advisor-interrupt')
+            for (const opinion of advisorRuntime.drainInterruptOpinions()) {
+              requeueMessageAtFront?.({ content: opinion, attachments: [] })
+            }
+          })
+        }
         const runConfig = createRunConfig({
           logger,
           agent: resolvedAgent,
@@ -648,7 +675,13 @@ export const useSendMessage = ({
           // in the buffer for the leftover handling below.
           drainSteeringMessages: () => {
             if (abortController.signal.aborted) return []
-            return drainSteeringBuffer(runOwnerId).map((entry) => entry.text)
+            const steeringTexts = drainSteeringBuffer(runOwnerId).map(
+              (entry) => entry.text,
+            )
+            // Advisor non-interrupting opinions ride the same step-boundary
+            // hook, injected as user prompts alongside any router steering.
+            const advisorOpinions = advisorRuntime?.drainOpinions() ?? []
+            return [...steeringTexts, ...advisorOpinions]
           },
         })
 
@@ -677,6 +710,18 @@ export const useSendMessage = ({
         // calling run(); the router falls back to the queue before this point.
         activateSteering(runOwnerId)
         const runState = await client.run(runConfig)
+
+        // Advisor review of the completed turn (side-channel, fire-and-forget;
+        // failures are swallowed to a warn log).
+        if (advisorRuntime && !abortController.signal.aborted) {
+          void advisorRuntime
+            .onTurnEnd(
+              runState.sessionState?.mainAgentState?.messageHistory ?? [],
+            )
+            .catch((advisorError) => {
+              logger.warn({ error: advisorError }, '[advisor] onTurnEnd failed')
+            })
+        }
 
         // Only adopt and persist the result while this run's chat is still
         // the active one. After a mid-run chat switch (/new, resuming from
@@ -751,6 +796,8 @@ export const useSendMessage = ({
           logger.debug({ error }, '[send-message] Ignoring error after abort')
         }
       } finally {
+        // Detach the advisor interrupt handler from this run's abort target.
+        setAdvisorInterruptHandler(null)
         // Close the steering mailbox. Anything the run never drained was
         // submitted after its last step boundary; retract its push-time
         // bubble (the requeued send mints its own at dequeue) and requeue it
