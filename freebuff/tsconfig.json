@@ -9,5 +9,5 @@
       "@codebuff/agent-runtime/*": ["../packages/agent-runtime/src/*"]
     }
   },
-  "include": ["acp/**/*.ts", "advisor/**/*.ts"]
+  "include": ["advisor/**/*.ts"]
 }
