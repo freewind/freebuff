@@ -6,7 +6,7 @@ import { z } from 'zod/v4'
 
 import { FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID } from '@codebuff/common/constants/freebuff-models'
 
-import { getConfigDir } from '../acp/config-dir'
+import { getConfigDir } from './config-dir'
 
 /** A single Advisor configuration (one advisor, per the simplified spec). */
 export interface AdvisorConfig {
