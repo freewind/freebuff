@@ -971,7 +971,12 @@ export async function loopAgentSteps(
   const toolDefinitions = mapValues(tools, (tool) => ({
     description:
       typeof tool.description === 'string' ? tool.description : undefined,
-    inputSchema: tool.inputSchema as {},
+    // Serialize to JSON Schema up front: Zod schemas are cyclic (internal
+    // def/_cachedInner chains) and would break the JSON round-trip deep clone
+    // when a previous run is resumed (sdk run-state applyOverridesToSessionState
+    // does JSON.parse(JSON.stringify(sessionState))). This snapshot is only
+    // used for context-pruner token counting (toolsForTokenCount below).
+    inputSchema: toTokenCountInputSchema(tool.inputSchema) ?? {},
   }))
 
   const additionalToolDefinitionsWithCache = async () => {

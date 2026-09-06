@@ -1,5 +1,7 @@
 import { mapValues } from 'lodash'
 
+import { toTokenCountInputSchema } from '../../../run-agent-step'
+
 import {
   validateAndGetAgentTemplate,
   validateAgentInput,
@@ -114,7 +116,9 @@ export const handleSpawnAgentInline = (async (
     toolDefinitions: mapValues(parentTools, (tool) => ({
       description:
         typeof tool.description === 'string' ? tool.description : undefined,
-      inputSchema: tool.inputSchema as {},
+      // Serialize to JSON Schema: Zod schemas are cyclic and would break the
+      // previousRun JSON round-trip deep clone on resume.
+      inputSchema: toTokenCountInputSchema(tool.inputSchema) ?? {},
     })),
   }
 
